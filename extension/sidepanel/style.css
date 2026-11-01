@@ -1,0 +1,369 @@
+:root {
+  --bg-main: #0d1117;
+  --bg-surface: #161b22;
+  --border: #30363d;
+  --text-main: #c9d1d9;
+  --text-muted: #8b949e;
+  --accent: #238636;
+  --accent-hover: #2ea043;
+  --danger: #da3633;
+  --input-bg: #010409;
+  --cyan: #58a6ff;
+  --green: #7ee787;
+  --red: #f85149;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100vh;
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+*, *::before, *::after {
+  box-sizing: inherit;
+}
+
+.header {
+  padding: 10px 14px;
+  background-color: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo h1 {
+  font-size: 13px;
+  margin: 0;
+  font-weight: 700;
+  color: #fff;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--danger);
+}
+
+.status-dot.online {
+  background-color: var(--accent-hover);
+  box-shadow: 0 0 6px var(--accent-hover);
+}
+
+.badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  background-color: #21262d;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.content {
+  flex: 1;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.card.flex-1 {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.card-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.flex-between {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.workspace-box {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.path-display {
+  flex: 1;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--green);
+}
+
+.token-input {
+  color: var(--text-main);
+  outline: none;
+}
+
+.token-input:focus {
+  border-color: var(--cyan);
+}
+
+.token-input::placeholder {
+  color: var(--text-muted);
+}
+
+.mcp-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mcp-tag {
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  background-color: #21262d;
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mcp-tag.active {
+  border-color: var(--accent);
+  color: var(--green);
+}
+
+.mcp-tag.disabled {
+  border-color: var(--danger);
+  color: var(--danger);
+  opacity: 0.7;
+}
+
+.mcp-name-btn {
+  cursor: pointer;
+}
+
+.mcp-remove-btn {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+  margin-left: 4px;
+  line-height: 1;
+}
+
+.mcp-remove-btn:hover {
+  color: #fff;
+}
+
+.activity-box {
+  flex: 1;
+  background-color: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 11px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.placeholder {
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 40px;
+}
+
+.log-entry {
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #21262d;
+}
+
+.log-entry .tool-name {
+  color: var(--cyan);
+  font-weight: bold;
+}
+
+.log-entry .snippet {
+  color: var(--text-muted);
+}
+
+.log-entry .success {
+  color: var(--green);
+}
+
+.log-entry .error {
+  color: var(--red);
+}
+
+.footer {
+  padding: 10px 14px;
+  background-color: var(--bg-surface);
+  border-top: 1px solid var(--border);
+}
+
+.btn {
+  width: 100%;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.btn-primary {
+  background-color: var(--accent);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background-color: var(--accent-hover);
+}
+
+.btn-secondary {
+  background-color: #21262d;
+  color: #c9d1d9;
+  border: 1px solid rgba(240, 246, 252, 0.1);
+}
+
+.btn-secondary:hover {
+  background-color: #30363d;
+}
+
+.btn-sm {
+  padding: 4px 8px;
+  font-size: 10px;
+  width: auto;
+}
+
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-content {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: 90%;
+  max-width: 320px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 13px;
+  color: #fff;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.close-btn:hover {
+  color: #fff;
+}
+
+.modal-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-group label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.form-group input {
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  color: var(--text-main);
+  font-size: 12px;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: var(--cyan);
+}

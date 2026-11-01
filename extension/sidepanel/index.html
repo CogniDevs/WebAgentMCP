@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="style.css">
+  <title>WebAgentMCP Panel</title>
+</head>
+<body>
+  <header class="header">
+    <div class="logo">
+      <span class="status-dot" id="server-status"></span>
+      <h1>WebAgentMCP</h1>
+    </div>
+    <span class="badge" id="platform-badge" data-i18n="detecting">Detecting...</span>
+  </header>
+
+  <main class="content">
+    <section class="card">
+      <div class="card-title" data-i18n="auth_key_title">Authorization (Auth Key)</div>
+      <div class="workspace-box">
+        <input type="password" id="auth-token-input" class="path-display token-input" data-i18n-placeholder="auth_key_placeholder" placeholder="Paste Auth Key from terminal...">
+        <button id="save-token-btn" class="btn btn-secondary btn-sm" data-i18n="save_btn">Save</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-title" data-i18n="workspace_title">Workspace</div>
+      <div class="workspace-box">
+        <div id="workspace-path" class="path-display" data-i18n="loading">Loading...</div>
+        <button id="pick-workspace-btn" class="btn btn-secondary btn-sm" data-i18n="choose_folder_btn">Choose Folder</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-title flex-between">
+        <span data-i18n="mcp_servers_title">MCP Servers</span>
+        <button id="show-add-mcp-btn" class="btn btn-secondary btn-sm" data-i18n="add_btn">+ Add</button>
+      </div>
+      <div id="mcp-list" class="mcp-badges">
+        <span class="mcp-tag active" data-i18n="core_mcp_tag">Core: Files & Terminal</span>
+        <span class="mcp-tag" id="mcp-count-tag" data-i18n="loading">Loading...</span>
+      </div>
+    </section>
+
+    <section class="card flex-1">
+      <div class="card-title" data-i18n="activity_title">Agent Activity</div>
+      <div id="activity-box" class="activity-box">
+        <div class="placeholder" data-i18n="activity_placeholder">Waiting for commands from AI web chat...</div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <button id="init-btn" class="btn btn-primary" data-i18n="init_chat_btn">Initialize Agent in Chat</button>
+  </footer>
+
+  <div id="mcp-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 data-i18n="modal_new_server_title">New MCP Server</h3>
+        <button id="close-mcp-modal" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label data-i18n="modal_server_name">Server Name</label>
+          <input type="text" id="mcp-name" placeholder="my-server">
+        </div>
+        <div class="form-group">
+          <label data-i18n="modal_command">Command</label>
+          <input type="text" id="mcp-command" placeholder="npx, node, uvx...">
+        </div>
+        <div class="form-group">
+          <label data-i18n="modal_args">Arguments (space separated)</label>
+          <input type="text" id="mcp-args" placeholder="-y @modelcontextprotocol/server-postgres">
+        </div>
+        <button id="save-mcp-btn" class="btn btn-primary" data-i18n="modal_save_launch">Save & Launch</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

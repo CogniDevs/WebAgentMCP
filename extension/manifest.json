@@ -1,0 +1,45 @@
+{
+	"manifest_version": 3,
+	"name": "WebAgentMCP",
+	"version": "0.1.0",
+	"description": "Universal Web-to-Local Bridge & MCP Host for any AI Chat",
+	"permissions": ["sidePanel", "activeTab", "storage", "scripting"],
+	"host_permissions": [
+		"http://127.0.0.1:5505/*",
+		"http://localhost:5505/*",
+		"http://127.0.0.1/*",
+		"http://localhost/*",
+		"ws://127.0.0.1:5505/*",
+		"ws://localhost:5505/*",
+		"ws://127.0.0.1/*",
+		"ws://localhost/*"
+	],
+	"background": {
+		"service_worker": "background.js"
+	},
+	"side_panel": {
+		"default_path": "sidepanel/index.html"
+	},
+	"content_scripts": [
+		{
+			"matches": [
+				"*://aistudio.google.com/*",
+				"*://chat.deepseek.com/*",
+				"*://chatgpt.com/*",
+				"*://gemini.google.com/*",
+				"*://*.claude.ai/*",
+				"*://chat.qwen.ai/*",
+				"*://chat.qwenlm.ai/*",
+				"*://kimi.moonshot.cn/*",
+				"*://z.ai/*"
+			],
+			"js": ["content/adapters.js", "content/engine.js"]
+		}
+	],
+	"web_accessible_resources": [
+		{
+			"resources": ["sidepanel/locales/*.json"],
+			"matches": ["<all_urls>"]
+		}
+	]
+}
