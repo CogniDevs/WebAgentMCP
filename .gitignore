@@ -10,6 +10,20 @@ build/
 config.json
 daemon/config.json
 
+# Auth files & secrets
+*-auth.json
+auth.json
+*.token
+*.env
+.env
+.env.*
+!*.example
+session/
+
+# Node
+node_modules/
+package-lock.json
+
 .idea/
 .vscode/
 *.swp

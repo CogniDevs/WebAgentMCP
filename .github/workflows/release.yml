@@ -79,10 +79,27 @@ jobs:
           name: webagentmcp-extension.zip
           path: webagentmcp-extension.zip
 
+  package-providers:
+    name: Package Providers & MCP Server
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create providers zip archive
+        run: |
+          zip -r webagentmcp-providers.zip providers mcp-server package.json README.md README.ru.md
+
+      - name: Upload providers artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: webagentmcp-providers.zip
+          path: webagentmcp-providers.zip
+
   publish-release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-daemon, package-extension]
+    needs: [build-daemon, package-extension, package-providers]
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4

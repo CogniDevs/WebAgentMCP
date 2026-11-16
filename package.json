@@ -1,0 +1,21 @@
+{
+  "name": "webagentmcp",
+  "version": "1.0.0",
+  "description": "Universal Web-to-Local Bridge & MCP Host for Web AI Chats",
+  "main": "providers/gateway/gateway.js",
+  "scripts": {
+    "gateway": "node providers/gateway/gateway.js",
+    "mcp": "node mcp-server/index.js",
+    "deepseek:auth": "node providers/deepseek/auth.js"
+  },
+  "keywords": [
+    "mcp",
+    "ai",
+    "deepseek",
+    "qwen",
+    "agent",
+    "webagent"
+  ],
+  "author": "CogniDevs",
+  "license": "MIT"
+}

@@ -23,5 +23,11 @@
 	"conn_error": "Connection Error",
 	"mcp_count": "MCP: {count} configured",
 	"tool_completed": "✓ Completed [{tool}]",
-	"tool_error": "✗ Error: {error}"
+	"tool_error": "✗ Error: {error}",
+	"mode_title": "Execution Mode",
+	"mode_auto": "Auto-send",
+	"mode_manual": "Manual review",
+	"pending_ready": "Tool output ready:",
+	"send_to_chat_btn": "Send to Chat",
+	"discard_btn": "Discard"
 }

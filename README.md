@@ -134,6 +134,35 @@ webagentmcp mcp remove db-server
 
 ---
 
+## Dual-Direction Agent Hub
+
+WebAgentMCP supports two complementary agentic workflows:
+
+### 1. Web-to-Local (Control Local Machine from Web Chat)
+Work inside web chat interfaces (DeepSeek, Qwen, Claude, AI Studio). The model generates `<tool>...</tool>` tags, and the local `webagentmcp` daemon executes them in your workspace, returning stdout directly into the chat.
+
+### 2. Agent-to-Web (Delegate Heavy Tasks to Free Web Models)
+Coding agents (Antigravity, Claude Code, Cursor, Aider) can delegate heavy refactoring, thinking/reasoning, and vibe-coding tasks to free web models (DeepSeek-R1 with reasoning, Qwen 3.7 Max with search) to save paid tokens.
+
+#### Unified OpenAI-compatible Gateway:
+```bash
+npm run gateway
+```
+Runs at `http://127.0.0.1:5506/v1` and supports:
+- `POST /v1/chat/completions` (JSON & SSE streaming with `reasoning_content`)
+- Models: `deepseek-reasoner` (R1), `deepseek-chat` (V3), `qwen3.7-max`, `qwen3.7-plus`, `qwen-turbo`.
+- **Anti-Ban Guard**: native WASM PoW solver for DeepSeek, session thread reuse, and human-like request jitter (600–2000ms).
+
+#### Agent MCP Server:
+```bash
+npm run mcp
+```
+Provides tools for external coding agents:
+- `ask_web_model` — single-turn query with thinking/reasoning process extraction.
+- `delegate_vibe_coding` — offload heavy multi-file refactoring and drafting to free web models.
+
+---
+
 ## License
 
 MIT License. See [LICENSE](LICENSE).

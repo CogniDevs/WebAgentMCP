@@ -23,5 +23,11 @@
 	"conn_error": "Ошибка подключения",
 	"mcp_count": "MCP: {count} настроено",
 	"tool_completed": "✓ Завершено [{tool}]",
-	"tool_error": "✗ Ошибка: {error}"
+	"tool_error": "✗ Ошибка: {error}",
+	"mode_title": "Режим выполнения",
+	"mode_auto": "Авто-отправка",
+	"mode_manual": "Ручной (подтверждение)",
+	"pending_ready": "Ответ готов к отправке:",
+	"send_to_chat_btn": "Отправить в чат",
+	"discard_btn": "Отмена"
 }

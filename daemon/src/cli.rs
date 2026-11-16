@@ -411,11 +411,28 @@ pub fn resolve_effective_workspace(cli_dir: Option<&str>, config_dir: &str) -> S
         return strip_unc_prefix(explicit);
     }
 
+    let cfg_p = Path::new(config_dir);
+    if !config_dir.trim().is_empty() && cfg_p.exists() && cfg_p.is_dir() {
+        return strip_unc_prefix(config_dir);
+    }
+
     if let Ok(curr) = std::env::current_dir() {
-        if let Ok(canon) = curr.canonicalize() {
+        let mut check = curr.clone();
+        let check_str = check.to_string_lossy().replace('\\', "/");
+        if check_str.ends_with("/target/release") || check_str.ends_with("/target/debug") {
+            if let Some(parent) = check.parent().and_then(|p| p.parent()) {
+                check = parent.to_path_buf();
+            }
+        } else if check_str.ends_with("/target") {
+            if let Some(parent) = check.parent() {
+                check = parent.to_path_buf();
+            }
+        }
+
+        if let Ok(canon) = check.canonicalize() {
             return strip_unc_prefix(&canon.to_string_lossy());
         }
-        return strip_unc_prefix(&curr.to_string_lossy());
+        return strip_unc_prefix(&check.to_string_lossy());
     }
 
     strip_unc_prefix(config_dir)

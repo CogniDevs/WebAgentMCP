@@ -28,6 +28,12 @@ extern "system" {
 }
 
 #[cfg(target_os = "windows")]
+#[link(name = "ole32")]
+extern "system" {
+    fn CoInitialize(pvReserved: *mut std::ffi::c_void) -> i32;
+}
+
+#[cfg(target_os = "windows")]
 #[link(name = "kernel32")]
 extern "system" {
     fn FreeConsole() -> i32;
@@ -197,7 +203,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if is_tray_internal {
-        run_tray_loop(port, &auth_token)?;
+        if let Err(e) = run_tray_loop(port, &auth_token) {
+            eprintln!("Tray notification icon could not be displayed ({}); running headless background service.", e);
+            rt.block_on(async {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+                }
+            });
+        }
     } else {
         rt.block_on(async {
             let _ = tokio::signal::ctrl_c().await;
@@ -213,6 +226,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn run_tray_loop(port: u16, auth_token: &str) -> Result<(), Box<dyn std::error::Error>> {
     use muda::{Menu, MenuItem, PredefinedMenuItem};
     use tray_icon::{Icon, TrayIconBuilder};
+
+    unsafe {
+        CoInitialize(std::ptr::null_mut());
+    }
 
     let menu = Menu::new();
     let item_open = MenuItem::new("Open AI Chat", true, None);

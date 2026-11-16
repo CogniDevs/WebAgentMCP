@@ -9,6 +9,50 @@
 	let unchangedTicks = 0
 	let previousLength = 0
 
+	// Deep text extractor that pierces Shadow DOM boundaries (crucial for Gemini & AI Studio)
+	function getDeepText(node) {
+		if (!node) return ''
+		let text = ''
+		if (node.nodeType === Node.TEXT_NODE) {
+			text += node.textContent
+		} else if (node.nodeType === Node.ELEMENT_NODE) {
+			if (node.shadowRoot) {
+				text += getDeepText(node.shadowRoot)
+			}
+			for (let child of node.childNodes) {
+				text += getDeepText(child)
+			}
+		}
+		return text
+	}
+
+	// Passive discovery & calibration: capture manually used file inputs and drop zones
+	document.addEventListener(
+		'change',
+		e => {
+			if (e.target && e.target.type === 'file') {
+				window.__webAgentActiveFileInput = e.target
+				console.log('[WebAgentMCP] Calibrated file input element:', e.target)
+			}
+		},
+		true,
+	)
+
+	document.addEventListener(
+		'drop',
+		e => {
+			if (
+				e.dataTransfer &&
+				e.dataTransfer.files &&
+				e.dataTransfer.files.length > 0
+			) {
+				window.__webAgentActiveDropZone = e.target
+				console.log('[WebAgentMCP] Calibrated drop zone element:', e.target)
+			}
+		},
+		true,
+	)
+
 	function findInput() {
 		for (const sel of adapter.inputSelectors) {
 			const el = document.querySelector(sel)
@@ -20,39 +64,104 @@
 	function injectText(input, text) {
 		input.focus()
 		if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
-			input.value = text
+			const lastVal = input.value
+			const nativeSetter =
+				Object.getOwnPropertyDescriptor(
+					window.HTMLTextAreaElement.prototype,
+					'value',
+				)?.set ||
+				Object.getOwnPropertyDescriptor(
+					window.HTMLInputElement.prototype,
+					'value',
+				)?.set
+
+			if (nativeSetter) {
+				nativeSetter.call(input, text)
+			} else {
+				input.value = text
+			}
+
+			// Inform React 16+ internal state tracker
+			const tracker = input._valueTracker
+			if (tracker) {
+				tracker.setValue(lastVal)
+			}
+
 			input.dispatchEvent(new Event('input', { bubbles: true, composed: true }))
+			input.dispatchEvent(
+				new InputEvent('input', {
+					bubbles: true,
+					composed: true,
+					inputType: 'insertText',
+					data: text,
+				}),
+			)
 			input.dispatchEvent(
 				new Event('change', { bubbles: true, composed: true }),
 			)
+			input.dispatchEvent(
+				new KeyboardEvent('keyup', { bubbles: true, composed: true }),
+			)
 		} else {
-			const dataTransfer = new DataTransfer()
-			dataTransfer.setData('text/plain', text)
-			const pasteEvent = new ClipboardEvent('paste', {
-				clipboardData: dataTransfer,
-				bubbles: true,
-				cancelable: true,
-			})
-			input.dispatchEvent(pasteEvent)
-			if (input.textContent.trim() === '') {
-				document.execCommand('selectAll', false, null)
-				document.execCommand('insertText', false, text)
+			// Rich text & contenteditable (Lexical, Slate, ProseMirror)
+			input.focus()
+			const sel = window.getSelection()
+			const range = document.createRange()
+			range.selectNodeContents(input)
+			sel.removeAllRanges()
+			sel.addRange(range)
+
+			let inserted = false
+			try {
+				inserted = document.execCommand('insertText', false, text)
+			} catch (_) {}
+
+			if (!inserted) {
+				const dataTransfer = new DataTransfer()
+				dataTransfer.setData('text/plain', text)
+				const pasteEvent = new ClipboardEvent('paste', {
+					clipboardData: dataTransfer,
+					bubbles: true,
+					cancelable: true,
+				})
+				input.dispatchEvent(pasteEvent)
+				if (input.textContent.trim() === '') {
+					input.innerText = text
+				}
 			}
+
+			input.dispatchEvent(
+				new InputEvent('input', {
+					bubbles: true,
+					composed: true,
+					inputType: 'insertText',
+					data: text,
+				}),
+			)
 			input.dispatchEvent(new Event('input', { bubbles: true, composed: true }))
+			input.dispatchEvent(new Event('change', { bubbles: true, composed: true }))
 		}
 	}
 
 	function tryClickSend() {
 		if (adapter.sendButtonSelectors) {
 			for (const btnSel of adapter.sendButtonSelectors) {
-				const btn = document.querySelector(btnSel)
-				if (
-					btn &&
-					!btn.disabled &&
-					btn.getAttribute('aria-disabled') !== 'true'
-				) {
-					btn.click()
-					return true
+				const buttons = document.querySelectorAll(btnSel)
+				for (const btn of buttons) {
+					if (
+						btn &&
+						!btn.disabled &&
+						btn.getAttribute('aria-disabled') !== 'true'
+					) {
+						const aria = (btn.getAttribute('aria-label') || '').toLowerCase()
+						const title = (btn.getAttribute('title') || '').toLowerCase()
+						const cls = (btn.className || '').toLowerCase()
+						if (aria.includes('setting') || title.includes('setting') || cls.includes('setting')) {
+							continue
+						}
+						btn.click()
+						return true
+					}
 				}
 			}
 		}
@@ -60,43 +169,158 @@
 	}
 
 	function triggerSubmit(input) {
+		// Anti-Ban human-like jitter delay (350ms - 800ms) before submission
+		const jitter = Math.floor(Math.random() * 450) + 350
 		setTimeout(() => {
-			if (adapter.sendMethod === 'ctrl_enter') {
-				input.dispatchEvent(
-					new KeyboardEvent('keydown', {
-						key: 'Enter',
-						code: 'Enter',
-						keyCode: 13,
-						which: 13,
-						ctrlKey: true,
-						bubbles: true,
-						cancelable: true,
-					}),
-				)
-			} else {
-				if (!tryClickSend()) {
-					input.dispatchEvent(
-						new KeyboardEvent('keydown', {
-							key: 'Enter',
-							code: 'Enter',
-							keyCode: 13,
-							which: 13,
-							bubbles: true,
-							cancelable: true,
-						}),
-					)
-				}
+			if (tryClickSend()) return
+
+			const isCtrl = adapter.sendMethod === 'ctrl_enter'
+			const keyEventProps = {
+				key: 'Enter',
+				code: 'Enter',
+				keyCode: 13,
+				which: 13,
+				ctrlKey: isCtrl,
+				bubbles: true,
+				cancelable: true,
+				composed: true,
 			}
-		}, 300)
+
+			input.dispatchEvent(new KeyboardEvent('keydown', keyEventProps))
+			input.dispatchEvent(new KeyboardEvent('keypress', keyEventProps))
+			input.dispatchEvent(new KeyboardEvent('keyup', keyEventProps))
+		}, jitter)
 	}
 
 	function injectAndSubmit(text) {
 		const input = findInput()
-		if (!input) return
+		if (!input) {
+			console.warn('[WebAgentMCP] Could not find prompt input on page')
+			return
+		}
 		injectText(input, text)
 		triggerSubmit(input)
 	}
 
+	function escapeXml(str) {
+		return (str || '').replace(/[<>&'"]/g, c => {
+			switch (c) {
+				case '<':
+					return '&lt;'
+				case '>':
+					return '&gt;'
+				case '&':
+					return '&amp;'
+				case "'":
+					return '&apos;'
+				case '"':
+					return '&quot;'
+			}
+		})
+	}
+
+	async function attachTextFile(fileName, content) {
+		const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+		const file = new File([blob], fileName, {
+			type: 'text/plain;charset=utf-8',
+		})
+		const dt = new DataTransfer()
+		dt.items.add(file)
+
+		// 1. Check dynamically calibrated file input from user actions
+		let fileInput = window.__webAgentActiveFileInput
+
+		// 2. Search configured adapter fileInputSelectors
+		if (!fileInput && adapter.fileInputSelectors) {
+			for (const sel of adapter.fileInputSelectors) {
+				const el = document.querySelector(sel)
+				if (el) {
+					fileInput = el
+					break
+				}
+			}
+		}
+
+		// 3. Fallback: query document for any input[type="file"]
+		if (!fileInput) {
+			fileInput = document.querySelector('input[type="file"]')
+		}
+
+		// 4. If input not rendered yet, trigger attach/plus button to mount it
+		if (!fileInput && adapter.attachButtonSelectors) {
+			for (const btnSel of adapter.attachButtonSelectors) {
+				const btn = document.querySelector(btnSel)
+				if (btn) {
+					btn.click()
+					await new Promise(r => setTimeout(r, 250))
+					fileInput = document.querySelector('input[type="file"]')
+					if (fileInput) break
+				}
+			}
+		}
+
+		// If input found, dispatch files
+		if (fileInput) {
+			try {
+				fileInput.files = dt.files
+				fileInput.dispatchEvent(
+					new Event('change', { bubbles: true, composed: true }),
+				)
+				fileInput.dispatchEvent(
+					new Event('input', { bubbles: true, composed: true }),
+				)
+				return true
+			} catch (err) {
+				console.warn('[WebAgentMCP] Error assigning to file input:', err)
+			}
+		}
+
+		// 5. Fallback: Drag-and-drop onto drop zone
+		let dropZone = window.__webAgentActiveDropZone
+		if (!dropZone && adapter.dropZoneSelectors) {
+			for (const sel of adapter.dropZoneSelectors) {
+				const el = document.querySelector(sel)
+				if (el && el.offsetParent !== null) {
+					dropZone = el
+					break
+				}
+			}
+		}
+		if (!dropZone) {
+			dropZone = findInput()
+		}
+
+		if (dropZone) {
+			try {
+				const dragEnter = new DragEvent('dragenter', {
+					dataTransfer: dt,
+					bubbles: true,
+					cancelable: true,
+				})
+				const dragOver = new DragEvent('dragover', {
+					dataTransfer: dt,
+					bubbles: true,
+					cancelable: true,
+				})
+				const dropEvent = new DragEvent('drop', {
+					dataTransfer: dt,
+					bubbles: true,
+					cancelable: true,
+				})
+
+				dropZone.dispatchEvent(dragEnter)
+				dropZone.dispatchEvent(dragOver)
+				dropZone.dispatchEvent(dropEvent)
+				return true
+			} catch (err) {
+				console.warn('[WebAgentMCP] Error dispatching drop event:', err)
+			}
+		}
+
+		return false
+	}
+
+	// Watchdog for stuck system messages
 	setInterval(() => {
 		const input = findInput()
 		if (!input) return
@@ -109,7 +333,8 @@
 		if (
 			text &&
 			(text.includes('[System - Tool Execution') ||
-				text.includes('[System - Image Saved]'))
+				text.includes('[System - Image Saved]') ||
+				text.includes('[System Notice]:'))
 		) {
 			const stopBtn = adapter.stopIndicator
 				? document.querySelector(adapter.stopIndicator)
@@ -132,28 +357,115 @@
 		}
 	}, 1000)
 
-	function parseAllTools(text) {
+	function extractToolsFromContainer(container) {
 		const tools = []
-		const regex =
-			/<(?:tool|tool_call)(?:=|\s+name=)?['"]?([a-zA-Z0-9_\-\.\:]+)['"]?([^>]*)>([\s\S]*?)<\/(?:tool|tool_call)>/gi
+		const seen = new Set()
+
+		const knownTools = [
+			'terminal_run', 'terminal_bg', 'terminal_logs', 'terminal_kill',
+			'cron_monitor', 'read', 'read_file', 'read_lines', 'view_dir',
+			'search_code', 'write', 'patch', 'replace', 'mcp_call'
+		]
+
+		function pushTool(rawIdent, rawBody) {
+			const cleanIdent = (rawIdent || '').trim()
+			const cleanBody = (rawBody || '').trim()
+			if (!cleanIdent && !cleanBody) return
+
+			let baseName = cleanIdent
+				.replace(/^[<`'"]+/, '')
+				.replace(/^run:/i, '')
+				.replace(/^tool:/i, '')
+				.split(/[\s='":]+/)[0]
+				.toLowerCase()
+
+			if (knownTools.includes(baseName) || cleanIdent.startsWith('run:') || cleanIdent.startsWith('tool:') || cleanIdent.startsWith('tool=')) {
+				const sig = `${baseName}:::${cleanBody}`
+				if (!seen.has(sig)) {
+					seen.add(sig)
+					tools.push({
+						identifier: cleanIdent || baseName,
+						name: baseName,
+						payload: cleanBody
+					})
+				}
+			}
+		}
+
+		// 1. DOM Inspection: Google AI Studio (<ms-code-block>)
+		const aiStudioBlocks = container.querySelectorAll('ms-code-block')
+		for (const block of aiStudioBlocks) {
+			const lang = block.getAttribute('data-test-language') || block.dataset.language || ''
+			const pre = block.querySelector('pre') || block.querySelector('code')
+			const codeText = pre ? pre.textContent : ''
+			if (lang) {
+				pushTool(lang, codeText)
+			}
+		}
+
+		// 2. DOM Inspection: Generic Code Blocks (Gemini, Qwen, DeepSeek, ChatGPT)
+		const codeBlocks = container.querySelectorAll('pre, div.code-block, div[class*="code-block"], .contain-inline-size')
+		for (const cb of codeBlocks) {
+			const codeEl = cb.tagName === 'PRE' ? (cb.querySelector('code') || cb) : (cb.querySelector('pre code') || cb.querySelector('code') || cb.querySelector('pre'))
+			let lang = ''
+			if (codeEl) {
+				const classNames = (codeEl.className || '') + ' ' + (cb.className || '')
+				const m = classNames.match(/language-([a-zA-Z0-9_\-:\.]+)/)
+				if (m) lang = m[1]
+			}
+			const headerEl = cb.querySelector('[class*="header"], [class*="decoration"], [class*="infostring"], span.code-block-language')
+			if (!lang && headerEl) {
+				lang = headerEl.textContent.trim()
+			}
+
+			const codeContent = (codeEl ? codeEl.textContent : cb.textContent) || ''
+			const firstLine = codeContent.trim().split('\n')[0].trim()
+			if (firstLine.startsWith('run:') || firstLine.startsWith('tool:') || firstLine.startsWith('tool=')) {
+				const rest = codeContent.trim().split('\n').slice(1).join('\n').trim()
+				pushTool(firstLine, rest || firstLine)
+			} else if (lang) {
+				pushTool(lang, codeContent)
+			}
+		}
+
+		// 3. Deep Text XML / Regex Parsing (fallback & handles raw text tools)
+		const deepText = getDeepText(container)
+
+		// 3a. Paired XML tags: <tool=terminal_run>...</tool>
+		const pairedRegex = /<(?:tool|tool_call|agent_tool)(?:=|\s+name=)?['"]?([a-zA-Z0-9_\-\.\:]+)['"]?([^>]*)>([\s\S]*?)<\/(?:tool|tool_call|agent_tool)>/gi
 		let match
-		while ((match = regex.exec(text)) !== null) {
+		while ((match = pairedRegex.exec(deepText)) !== null) {
 			const toolName = match[1]
 			const rawAttrs = match[2]
 			const payload = match[3].trim()
-			const fullIdentifier = (toolName + ' ' + rawAttrs).trim()
-			tools.push({
-				identifier: fullIdentifier,
-				name: toolName,
-				payload: payload,
-			})
+			pushTool((toolName + ' ' + rawAttrs).trim(), payload)
 		}
+
+		// 3b. Single / unclosed XML tags (Gemini: <tool='read' path='README.ru.md'> or <tool='terminal_run'>git status)
+		const singleRegex = /<(?:tool|tool_call|agent_tool)(?:=|\s+name=)?['"]?([a-zA-Z0-9_\-\.\:]+)['"]?([^>]*?)(?:\/?>)([\s\S]*?)(?:$|(?=<tool)|(?=\n\n))/gi
+		while ((match = singleRegex.exec(deepText)) !== null) {
+			const toolName = match[1]
+			const rawAttrs = match[2].trim()
+			const rest = match[3] ? match[3].trim() : ''
+			const payload = rest || rawAttrs
+			pushTool((toolName + ' ' + rawAttrs).trim(), payload)
+		}
+
+		// 3c. Unrendered raw markdown fences: ```run:terminal_run ... ```
+		const mdBlockRegex = /```(?:tool[:=\s]+([a-zA-Z0-9_\-\.\:]+)|run:([a-zA-Z0-9_\-\.\:]+)|([a-zA-Z0-9_\-\.\:]+))([^`]*?)```/gi
+		while ((match = mdBlockRegex.exec(deepText)) !== null) {
+			const rawName = (match[1] || match[2] || match[3] || '').trim()
+			const body = (match[4] || '').trim()
+			pushTool(rawName, body)
+		}
+
 		return tools
 	}
 
 	async function runToolsSequentially(tools) {
 		isExecuting = true
-		const results = []
+		const inlineResults = []
+		const xmlBlocks = []
 
 		const storageRes = await new Promise(resolve => {
 			chrome.storage.local.get(['authToken'], resolve)
@@ -173,8 +485,11 @@
 			if (!token) {
 				const noTokenMsg =
 					'Error 401: Auth Key is missing in WebAgentMCP side panel. Please enter your Auth Key and click Save.'
-				results.push(
+				inlineResults.push(
 					`[System - Tool Execution: ${t.name}]\nStatus: Error\nOutput:\n${noTokenMsg}\n`,
+				)
+				xmlBlocks.push(
+					`  <tool_result name="${escapeXml(t.name)}" call="${escapeXml(t.identifier)}" status="error">\n<![CDATA[\n${noTokenMsg}\n]]>\n  </tool_result>`,
 				)
 				chrome.runtime.sendMessage({
 					target: 'sidepanel',
@@ -211,11 +526,17 @@
 					outputText = `HTTP ${response.status} (Empty Response)`
 				}
 
-				if (!response.ok) {
-					results.push(
-						`[System - Tool Execution: ${t.name}]\nStatus: Error\nOutput:\n${outputText}\n`,
-					)
+				const statusStr = response.ok ? 'Success' : 'Error'
+				inlineResults.push(
+					`[System - Tool Execution: ${t.name}]\nStatus: ${statusStr}\nOutput:\n${outputText}\n`,
+				)
 
+				const cleanCdata = outputText.replace(/]]>/g, ']]&gt;')
+				xmlBlocks.push(
+					`  <tool_result name="${escapeXml(t.name)}" call="${escapeXml(t.identifier)}" status="${statusStr.toLowerCase()}">\n<![CDATA[\n${cleanCdata}\n]]>\n  </tool_result>`,
+				)
+
+				if (!response.ok) {
 					chrome.runtime.sendMessage({
 						target: 'sidepanel',
 						type: 'TOOL_ERROR',
@@ -223,10 +544,6 @@
 						error: outputText,
 					})
 				} else {
-					results.push(
-						`[System - Tool Execution: ${t.name}]\nStatus: Success\nOutput:\n${outputText}\n`,
-					)
-
 					chrome.runtime.sendMessage({
 						target: 'sidepanel',
 						type: 'TOOL_RESULT',
@@ -236,8 +553,11 @@
 				}
 			} catch (err) {
 				const errorMsg = err.message || String(err)
-				results.push(
+				inlineResults.push(
 					`[System - Tool Execution: ${t.name}]\nStatus: Error\nOutput:\n${errorMsg}\n`,
+				)
+				xmlBlocks.push(
+					`  <tool_result name="${escapeXml(t.name)}" call="${escapeXml(t.identifier)}" status="error">\n<![CDATA[\n${errorMsg}\n]]>\n  </tool_result>`,
 				)
 
 				chrome.runtime.sendMessage({
@@ -249,16 +569,49 @@
 			}
 		}
 
-		const combinedText = results.join(
+		const MAX_INLINE_CHARS = 1500
+		const combinedInlineText = inlineResults.join(
 			'\n------------------------------------\n',
 		)
-		const responsePrompt = `${combinedText}\n\nInstruction: Review output above and proceed with next action.`
 
-		injectAndSubmit(responsePrompt)
+		let responsePrompt = ''
+		let attachedFile = false
 
-		setTimeout(() => {
-			isExecuting = false
-		}, 1200)
+		if (combinedInlineText.length <= MAX_INLINE_CHARS) {
+			responsePrompt = `${combinedInlineText}\n\nInstruction: Review output above and proceed with next action.`
+		} else {
+			const xmlReport = `<?xml version="1.0" encoding="UTF-8"?>\n<system_execution_report timestamp="${new Date().toISOString()}">\n${xmlBlocks.join('\n')}\n</system_execution_report>`
+			const attached = await attachTextFile('tool_results.txt', xmlReport)
+			await new Promise(r => setTimeout(r, 500))
+
+			if (attached) {
+				attachedFile = true
+				responsePrompt = `[System Notice]: Tool execution output exceeded chat inline limit and is attached as tool_results.txt. Review the attached XML report and proceed with the next step.`
+			} else {
+				responsePrompt = `${combinedInlineText}\n\nInstruction: Review output above and proceed with next action.`
+			}
+		}
+
+		// Check mode: Auto-send vs Manual Confirmation
+		const modeConfig = await new Promise(resolve => {
+			chrome.storage.local.get(['autoSendMode'], resolve)
+		})
+		const isAutoMode = modeConfig.autoSendMode !== false
+
+		if (isAutoMode) {
+			injectAndSubmit(responsePrompt)
+			setTimeout(() => {
+				isExecuting = false
+			}, 1200)
+		} else {
+			// Manual confirmation mode: send to sidepanel and wait for user button click
+			chrome.runtime.sendMessage({
+				target: 'sidepanel',
+				type: 'TOOL_OUTPUT_PENDING',
+				prompt: responsePrompt,
+				preview: combinedInlineText.slice(0, 300),
+			})
+		}
 	}
 
 	setInterval(() => {
@@ -268,143 +621,50 @@
 		if (!containers || containers.length === 0) return
 
 		const last = containers[containers.length - 1]
-		const currentText = last.innerText || last.textContent || ''
+		if (last.hasAttribute('data-agent-processed')) return
+
+		const currentText = getDeepText(last)
 		const currentLength = currentText.length
 
-		const stopBtn = adapter.stopIndicator
-			? document.querySelector(adapter.stopIndicator)
-			: null
-		const isStillGenerating = !!stopBtn
+		let isGenerating = false
+		if (adapter.stopIndicator) {
+			const stopBtn = document.querySelector(adapter.stopIndicator)
+			isGenerating =
+				!!stopBtn && (stopBtn.offsetWidth > 0 || stopBtn.offsetHeight > 0)
+		}
 
-		if (
-			!isStillGenerating &&
-			currentLength > 0 &&
-			currentLength === previousLength
-		) {
-			unchangedTicks++
-			if (unchangedTicks >= 3) {
-				unchangedTicks = 0
-				const signature = currentText.slice(-300)
-				if (signature !== lastProcessedHash) {
-					const tools = parseAllTools(currentText)
-					if (tools.length > 0) {
-						lastProcessedHash = signature
-						runToolsSequentially(tools)
-					}
-				}
-			}
-		} else {
-			unchangedTicks = 0
+		if (currentLength > previousLength) {
 			previousLength = currentLength
+			unchangedTicks = 0
+		} else if (currentLength > 0) {
+			unchangedTicks++
+		}
+
+		// Execute if generation stopped (at least 2 ticks = 1s without change)
+		// OR safety fallback: if text unchanged for 5 ticks (2.5s) even if stop indicator has false match
+		if ((!isGenerating && unchangedTicks >= 2) || unchangedTicks >= 5) {
+			unchangedTicks = 0
+			previousLength = 0
+			last.setAttribute('data-agent-processed', 'true')
+			const tools = extractToolsFromContainer(last)
+			if (tools.length > 0) {
+				runToolsSequentially(tools)
+			}
 		}
 	}, 500)
 
-	function sendImagePayload(base64) {
-		chrome.storage.local.get(['authToken'], res => {
-			const token = (res && res.authToken ? res.authToken : '').trim()
-			if (!token) return
-
-			const headers = {
-				'Content-Type': 'application/json',
-				Authorization: `Bearer ${token}`,
-			}
-
-			fetch('http://127.0.0.1:5505/api/save-image', {
-				method: 'POST',
-				headers: headers,
-				body: JSON.stringify({ base64: base64 }),
-			})
-				.then(res => res.json())
-				.then(data => {
-					if (data.status === 'ok') {
-						injectAndSubmit(
-							`[System - Image Saved]: An image or graphic you created was automatically downloaded and saved to: ${data.path}\nYou can reference this relative path in your code if needed.`,
-						)
-					}
-				})
-				.catch(() => {})
-		})
-	}
-
-	setInterval(() => {
-		try {
-			const images = document.querySelectorAll('img')
-			for (const img of images) {
-				if (img.dataset.agentProcessedSrc === img.src) continue
-				img.dataset.agentProcessedSrc = img.src
-
-				if (
-					img.src.includes('.svg') ||
-					img.src.includes('avatar') ||
-					img.src.includes('favicon')
-				)
-					continue
-
-				const processImg = () => {
-					if (
-						!img.src.startsWith('blob:') &&
-						(img.width < 100 || img.height < 100)
-					)
-						return
-
-					try {
-						const canvas = document.createElement('canvas')
-						canvas.width = img.naturalWidth || img.width
-						canvas.height = img.naturalHeight || img.height
-						const ctx = canvas.getContext('2d')
-						ctx.drawImage(img, 0, 0)
-						const base64 = canvas.toDataURL('image/png')
-						if (base64 !== 'data:,') {
-							sendImagePayload(base64)
-						}
-					} catch (e) {
-						fetch(img.src)
-							.then(r => r.blob())
-							.then(b => {
-								const reader = new FileReader()
-								reader.onloadend = () => sendImagePayload(reader.result)
-								reader.readAsDataURL(b)
-							})
-							.catch(() => {})
-					}
-				}
-
-				if (img.src.startsWith('blob:') || img.complete) {
-					processImg()
-				} else {
-					img.addEventListener('load', processImg, { once: true })
-				}
-			}
-
-			const svgs = document.querySelectorAll(
-				'svg:not([data-agent-processed="true"])',
-			)
-			for (const svg of svgs) {
-				if (svg.clientWidth < 100 || svg.clientHeight < 100) {
-					svg.dataset.agentProcessed = 'true'
-					continue
-				}
-				if (
-					svg.classList.contains('icon') ||
-					svg.getAttribute('aria-hidden') === 'true'
-				) {
-					svg.dataset.agentProcessed = 'true'
-					continue
-				}
-
-				svg.dataset.agentProcessed = 'true'
-				const svgData = new XMLSerializer().serializeToString(svg)
-				const base64 =
-					'data:image/svg+xml;base64,' +
-					btoa(unescape(encodeURIComponent(svgData)))
-				sendImagePayload(base64)
-			}
-		} catch (err) {}
-	}, 2000)
-
-	chrome.runtime.onMessage.addListener(msg => {
+	chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 		if (msg.action === 'INJECT_SYSTEM_PROMPT') {
 			injectAndSubmit(msg.prompt)
+		} else if (msg.action === 'SUBMIT_PENDING_PROMPT') {
+			injectAndSubmit(msg.prompt)
+			setTimeout(() => {
+				isExecuting = false
+			}, 1200)
+			sendResponse({ ok: true })
+		} else if (msg.action === 'DISCARD_PENDING_PROMPT') {
+			isExecuting = false
+			sendResponse({ ok: true })
 		}
 	})
 })()

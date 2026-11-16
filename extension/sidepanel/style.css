@@ -367,3 +367,60 @@ body {
   outline: none;
   border-color: var(--cyan);
 }
+
+.mode-options {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.mode-radio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.mode-radio-label input[type="radio"] {
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.pending-box {
+  margin-top: 10px;
+  padding: 8px;
+  background-color: var(--input-bg);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+}
+
+.pending-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--yellow, #e3b341);
+  margin-bottom: 4px;
+}
+
+.pending-box .snippet {
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  max-height: 80px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  margin-bottom: 8px;
+}
+
+.pending-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.pending-actions .btn {
+  flex: 1;
+  padding: 6px;
+  font-size: 11px;
+}

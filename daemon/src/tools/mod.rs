@@ -14,16 +14,35 @@ impl ToolDispatcher {
         payload: &str,
         terminal: &TerminalManager,
     ) -> Result<String, String> {
-        let combined = format!("<tool {} >{}</tool>", raw_name, payload);
-        let tool_name = raw_name
-            .split(|c: char| c.is_whitespace() || c == '\'' || c == '"')
-            .next()
-            .unwrap_or(raw_name)
+        let clean_raw = raw_name
+            .trim()
+            .trim_start_matches(|c: char| c == '\'' || c == '"' || c == '<' || c == '`')
+            .trim_end_matches(|c: char| c == '\'' || c == '"' || c == '>' || c == '`')
+            .trim()
+            .trim_start_matches("run:")
+            .trim_start_matches("tool:");
+        let combined = format!("<tool {} >{}</tool>", clean_raw, payload);
+        let tool_name = clean_raw
+            .split(|c: char| c.is_whitespace() || c == '=' || c == ':' || c == '\'' || c == '"')
+            .find(|s| !s.is_empty())
+            .unwrap_or("")
+            .trim_start_matches("run:")
+            .trim_start_matches("tool:")
             .trim();
 
         match tool_name {
             "view_dir" => {
-                let sub = payload.trim();
+                let sub_re = Regex::new(r#"(?:path|sub|dir)=['"]([^'"]+)['"]"#).unwrap();
+                let sub = sub_re
+                    .captures(&combined)
+                    .map(|c| c.get(1).unwrap().as_str())
+                    .unwrap_or_else(|| {
+                        let mut t = payload.trim();
+                        if let Some(rest) = t.strip_prefix("1 ") {
+                            t = rest.trim();
+                        }
+                        t.trim_matches('\'').trim_matches('"')
+                    });
                 fs::view_dir(workspace, sub)
             }
             "read" | "read_file" => {
@@ -31,7 +50,10 @@ impl ToolDispatcher {
                 let path = path_re
                     .captures(&combined)
                     .map(|c| c.get(1).unwrap().as_str())
-                    .unwrap_or(payload.trim());
+                    .unwrap_or_else(|| {
+                        let t = payload.trim();
+                        t.trim_start_matches("path=").trim_matches('\'').trim_matches('"').trim()
+                    });
 
                 fs::read_file(workspace, path)
             }

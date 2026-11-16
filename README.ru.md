@@ -133,6 +133,35 @@ webagentmcp mcp remove db-server
 
 ---
 
+## Двусторонний режим (Dual-Direction Agent Hub)
+
+WebAgentMCP поддерживает два дополняющих друг друга сценария:
+
+### 1. Web-to-Local (Управление компьютером из браузера)
+Вы находитесь в веб-интерфейсе (DeepSeek, Qwen, Claude, AI Studio), отправляете запрос модели, модель генерирует теги `<tool>...</tool>`, локальный демон `webagentmcp` выполняет действия в терминале или файлах и возвращает результат в диалог.
+
+### 2. Agent-to-Web (Делегирование задач веб-моделям для экономии токенов)
+Внешние агенты (Antigravity, Claude Code, Cursor, Aider) могут использовать бесплатные веб-модели (DeepSeek-R1 с reasoning, Qwen 3.7 Max с поиском) для тяжелых вычислительных задач и вайбкодинга без затрат на платные токены.
+
+#### Запуск единого шлюза (OpenAI-compatible):
+```bash
+npm run gateway
+```
+Шлюз поднимается на `http://127.0.0.1:5506/v1` и поддерживает:
+- `POST /v1/chat/completions` (с потоковым SSE и передачей `reasoning_content`)
+- Модели: `deepseek-reasoner` (R1), `deepseek-chat` (V3), `qwen3.7-max`, `qwen3.7-plus`, `qwen-turbo`.
+- **Anti-Ban Guard**: автоматический расчет WASM PoW для DeepSeek, сессионный троттлинг и рандомизированный джиттер между запросами.
+
+#### Использование через MCP Server:
+```bash
+npm run mcp
+```
+Предоставляет агентам инструменты:
+- `ask_web_model` — разовый запрос к DeepSeek/Qwen с получением цепочки рассуждений.
+- `delegate_vibe_coding` — отправка объемной задачи на рефакторинг/написание кода с получением готового решения.
+
+---
+
 ## Лицензия
 
 MIT License. См. файл [LICENSE](LICENSE).

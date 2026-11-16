@@ -214,6 +214,15 @@ struct TreeNode {
 }
 
 fn build_tree(dir: &Path, gitignore: Option<&ignore::gitignore::Gitignore>) -> Option<TreeNode> {
+    build_tree_with_depth(dir, gitignore, 0, usize::MAX)
+}
+
+fn build_tree_with_depth(
+    dir: &Path,
+    gitignore: Option<&ignore::gitignore::Gitignore>,
+    current_depth: usize,
+    max_depth: usize,
+) -> Option<TreeNode> {
     if !dir.exists() || !dir.is_dir() {
         return None;
     }
@@ -228,6 +237,10 @@ fn build_tree(dir: &Path, gitignore: Option<&ignore::gitignore::Gitignore>) -> O
         is_dir: true,
         children: Vec::new(),
     };
+
+    if current_depth >= max_depth {
+        return Some(node);
+    }
 
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
@@ -247,8 +260,19 @@ fn build_tree(dir: &Path, gitignore: Option<&ignore::gitignore::Gitignore>) -> O
 
     let default_ignore = [
         ".git", "node_modules", "target", "dist", "build", "out",
-        "__pycache__", ".venv", "venv", ".idea", ".vscode",
+        "__pycache__", ".venv", "venv", ".idea", ".vscode", ".webagentmcp", "agent-creations",
     ];
+
+    let default_binary_exts = [
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".exe", ".dll", ".bin", ".zip",
+        ".tar", ".gz", ".rar", ".7z", ".mp3", ".mp4", ".wav", ".avi", ".mov", ".woff", ".woff2",
+        ".ttf", ".db", ".sqlite", ".sqlite3", ".dmg", ".iso", ".msi", ".class", ".pyc", ".o",
+        ".obj", ".so", ".dylib", ".svg", ".rlib", ".rmeta", ".pdb", ".whl", ".wasm", ".d", ".a",
+        ".lib",
+    ];
+
+    let mut dir_items = Vec::new();
+    let mut file_items = Vec::new();
 
     for entry in items {
         let path = entry.path();
@@ -265,20 +289,105 @@ fn build_tree(dir: &Path, gitignore: Option<&ignore::gitignore::Gitignore>) -> O
             }
         }
 
-        if is_dir {
-            if let Some(child_node) = build_tree(&path, gitignore) {
-                node.children.push(child_node);
+        if !is_dir {
+            if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                let ext_with_dot = format!(".{}", ext.to_lowercase());
+                if default_binary_exts.contains(&ext_with_dot.as_str()) {
+                    continue;
+                }
             }
+            file_items.push((path, file_name));
         } else {
+            dir_items.push((path, file_name));
+        }
+    }
+
+    // Always process subdirectories first so all top-level components are visible
+    for (dir_path, _) in dir_items {
+        if let Some(child_node) = build_tree_with_depth(&dir_path, gitignore, current_depth + 1, max_depth) {
+            node.children.push(child_node);
+        }
+    }
+
+    // Process files, but cap at 8 per directory to keep structure concise
+    let total_files = file_items.len();
+    if total_files <= 8 {
+        for (_, file_name) in file_items {
             node.children.push(TreeNode {
                 name: file_name,
                 is_dir: false,
                 children: Vec::new(),
             });
         }
+    } else {
+        for (_, file_name) in file_items.into_iter().take(6) {
+            node.children.push(TreeNode {
+                name: file_name,
+                is_dir: false,
+                children: Vec::new(),
+            });
+        }
+        node.children.push(TreeNode {
+            name: format!("... ({} more files)", total_files - 6),
+            is_dir: false,
+            children: Vec::new(),
+        });
     }
 
     Some(node)
+}
+
+pub fn get_project_overview(workspace: &str) -> (String, Option<String>) {
+    let clean_workspace = workspace.strip_prefix(r"\\?\").unwrap_or(workspace);
+    let root = Path::new(clean_workspace);
+    if !root.exists() || !root.is_dir() {
+        return (String::new(), None);
+    }
+
+    let mut gi_builder = GitignoreBuilder::new(root);
+    let gitignore_file = root.join(".gitignore");
+    if gitignore_file.exists() {
+        let _ = gi_builder.add(&gitignore_file);
+    }
+    let gitignore = gi_builder.build().ok();
+
+    // Top-level structure capped at depth 2 to keep tokens minimal
+    let tree_str = match build_tree_with_depth(root, gitignore.as_ref(), 0, 2) {
+        Some(tree_root) => {
+            let lines = render_ascii_tree(&tree_root, "", false, true);
+            if lines.len() > 80 {
+                let mut truncated = lines[..80].to_vec();
+                truncated.push(format!("... [Showing first 80 of {} top-level entries]", lines.len()));
+                truncated.join("\n")
+            } else {
+                lines.join("\n")
+            }
+        }
+        None => String::new(),
+    };
+
+    let readme_candidates = [
+        "README.md", "README.ru.md", "readme.md", "Readme.md", "README.txt", "readme.txt"
+    ];
+    let mut readme_content = None;
+    for candidate in &readme_candidates {
+        let p = root.join(candidate);
+        if p.exists() && p.is_file() {
+            if let Ok(raw) = fs::read_to_string(&p) {
+                let sanitized = sanitize_secrets(&raw);
+                let lines: Vec<&str> = sanitized.lines().collect();
+                let snippet = if lines.len() > 200 {
+                    format!("{}\n\n[... Remaining {} lines of README omitted for initial onboarding ...]", lines[..200].join("\n"), lines.len() - 200)
+                } else {
+                    sanitized
+                };
+                readme_content = Some(snippet);
+                break;
+            }
+        }
+    }
+
+    (tree_str, readme_content)
 }
 
 fn render_ascii_tree(node: &TreeNode, indent: &str, is_last: bool, is_root: bool) -> Vec<String> {
@@ -343,9 +452,9 @@ pub fn view_dir(workspace: &str, sub_dir: &str) -> Result<String, String> {
                 Ok("Directory is empty".to_string())
             } else {
                 let count = lines.len();
-                if count > 400 {
-                    let mut truncated = lines[..400].to_vec();
-                    truncated.push(format!("... [Showing first 400 of {} items listed]", count));
+                if count > 2000 {
+                    let mut truncated = lines[..2000].to_vec();
+                    truncated.push(format!("... [Showing first 2000 of {} items listed]", count));
                     Ok(truncated.join("\n"))
                 } else {
                     Ok(lines.join("\n"))
@@ -364,20 +473,6 @@ pub fn read_file(workspace: &str, path: &str) -> Result<String, String> {
     }
     let raw = fs::read_to_string(&full).map_err(|e| e.to_string())?;
     let content = sanitize_secrets(&raw);
-
-    let lines: Vec<&str> = content.lines().collect();
-    let total_lines = lines.len();
-
-    if total_lines > 250 {
-        let slice = lines[..250].join("\n");
-        return Ok(format!(
-            "{}\n\n[Showing lines 1-250 of {}. File is preserved intact. To inspect subsequent lines, invoke: <tool='read_lines' path='{}' start='251' end='500'></tool>]",
-            slice,
-            total_lines,
-            path
-        ));
-    }
-
     Ok(content)
 }
 

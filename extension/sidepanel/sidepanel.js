@@ -16,7 +16,15 @@ document.addEventListener('DOMContentLoaded', () => {
 	const mcpArgsInput = document.getElementById('mcp-args')
 	const authTokenInput = document.getElementById('auth-token-input')
 	const saveTokenBtn = document.getElementById('save-token-btn')
+	const modeAutoRadio = document.getElementById('mode-auto')
+	const modeManualRadio = document.getElementById('mode-manual')
+	const modeBadge = document.getElementById('mode-status-badge')
+	const pendingBox = document.getElementById('pending-submission')
+	const pendingSnippet = document.getElementById('pending-snippet')
+	const sendPendingBtn = document.getElementById('send-pending-btn')
+	const discardPendingBtn = document.getElementById('discard-pending-btn')
 
+	let pendingPrompt = ''
 	let currentAuthToken = ''
 	let currentLang =
 		navigator.language && navigator.language.startsWith('ru') ? 'ru' : 'en'
@@ -80,14 +88,30 @@ document.addEventListener('DOMContentLoaded', () => {
 		})
 	}
 
+	function getActiveTab(callback) {
+		chrome.tabs.query({ active: true, lastFocusedWindow: true }, tabs => {
+			if (tabs && tabs.length > 0 && tabs[0].id) {
+				callback(tabs[0])
+			} else {
+				chrome.tabs.query({ active: true }, fallbackTabs => {
+					if (fallbackTabs && fallbackTabs.length > 0) {
+						callback(fallbackTabs[0])
+					} else {
+						callback(null)
+					}
+				})
+			}
+		})
+	}
+
 	function updateActiveTabPlatform() {
-		chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-			if (!tabs[0] || !tabs[0].url) {
+		getActiveTab(tab => {
+			if (!tab || !tab.url) {
 				platformBadge.textContent = tr('unknown')
 				return
 			}
 			try {
-				const url = new URL(tabs[0].url)
+				const url = new URL(tab.url)
 				platformBadge.textContent = url.hostname
 			} catch {
 				platformBadge.textContent = tr('unknown')
@@ -220,7 +244,7 @@ document.addEventListener('DOMContentLoaded', () => {
 			.catch(() => {})
 	})
 
-	chrome.storage.local.get(['authToken'], res => {
+	chrome.storage.local.get(['authToken', 'autoSendMode'], res => {
 		if (res.authToken) {
 			currentAuthToken = res.authToken
 			if (authTokenInput) {
@@ -228,11 +252,65 @@ document.addEventListener('DOMContentLoaded', () => {
 			}
 		}
 
+		const isAuto = res.autoSendMode !== false
+		if (modeAutoRadio) modeAutoRadio.checked = isAuto
+		if (modeManualRadio) modeManualRadio.checked = !isAuto
+		if (modeBadge) modeBadge.textContent = isAuto ? 'Auto' : 'Manual'
+
 		setLanguage(currentLang).then(() => {
 			updateActiveTabPlatform()
 			checkServer()
 		})
 	})
+
+	if (modeAutoRadio) {
+		modeAutoRadio.addEventListener('change', () => {
+			chrome.storage.local.set({ autoSendMode: true })
+			if (modeBadge) modeBadge.textContent = 'Auto'
+		})
+	}
+
+	if (modeManualRadio) {
+		modeManualRadio.addEventListener('change', () => {
+			chrome.storage.local.set({ autoSendMode: false })
+			if (modeBadge) modeBadge.textContent = 'Manual'
+		})
+	}
+
+	if (sendPendingBtn) {
+		sendPendingBtn.addEventListener('click', () => {
+			if (!pendingPrompt) return
+			getActiveTab(tab => {
+				if (tab && tab.id) {
+					chrome.tabs.sendMessage(
+						tab.id,
+						{
+							action: 'SUBMIT_PENDING_PROMPT',
+							prompt: pendingPrompt,
+						},
+						() => {
+							pendingPrompt = ''
+							if (pendingBox) pendingBox.classList.add('hidden')
+						},
+					)
+				}
+			})
+		})
+	}
+
+	if (discardPendingBtn) {
+		discardPendingBtn.addEventListener('click', () => {
+			pendingPrompt = ''
+			if (pendingBox) pendingBox.classList.add('hidden')
+			getActiveTab(tab => {
+				if (tab && tab.id) {
+					chrome.tabs.sendMessage(tab.id, {
+						action: 'DISCARD_PENDING_PROMPT',
+					})
+				}
+			})
+		})
+	}
 
 	setInterval(checkServer, 2000)
 
@@ -274,11 +352,25 @@ document.addEventListener('DOMContentLoaded', () => {
 			activityBox.appendChild(entry)
 			activityBox.scrollTop = activityBox.scrollHeight
 		}
+
+		if (msg.type === 'TOOL_OUTPUT_PENDING') {
+			pendingPrompt = msg.prompt
+			if (pendingSnippet) pendingSnippet.textContent = msg.preview || ''
+			if (pendingBox) pendingBox.classList.remove('hidden')
+		}
 	})
 
 	initBtn.addEventListener('click', () => {
-		chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-			if (!tabs[0] || !tabs[0].id) return
+		const originalText = initBtn.textContent
+		initBtn.textContent = '...'
+		initBtn.disabled = true
+
+		getActiveTab(tab => {
+			if (!tab || !tab.id) {
+				initBtn.textContent = originalText
+				initBtn.disabled = false
+				return
+			}
 
 			fetch('http://127.0.0.1:5505/api/system-prompt', {
 				headers: getAuthHeaders(),
@@ -288,12 +380,25 @@ document.addEventListener('DOMContentLoaded', () => {
 					return res.json()
 				})
 				.then(data => {
-					chrome.tabs.sendMessage(tabs[0].id, {
-						action: 'INJECT_SYSTEM_PROMPT',
-						prompt: data.prompt,
-					})
+					chrome.tabs.sendMessage(
+						tab.id,
+						{
+							action: 'INJECT_SYSTEM_PROMPT',
+							prompt: data.prompt,
+						},
+						response => {
+							initBtn.textContent = originalText
+							initBtn.disabled = false
+						},
+					)
 				})
-				.catch(() => {})
+				.catch(() => {
+					initBtn.textContent = originalText
+					initBtn.disabled = false
+				})
 		})
 	})
+	if (chrome.windows && chrome.windows.onFocusChanged) {
+		chrome.windows.onFocusChanged.addListener(updateActiveTabPlatform)
+	}
 })

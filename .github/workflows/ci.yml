@@ -1,0 +1,57 @@
+name: CI & Build Verification
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check-daemon:
+    name: Check & Build Daemon (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+          - os: ubuntu-latest
+          - os: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo check & build
+        shell: bash
+        run: |
+          cd daemon
+          cargo check
+          cargo build --release
+
+  check-providers:
+    name: Check Node.js Providers & MCP
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Syntax check providers
+        run: |
+          node -c providers/deepseek/pow.js
+          node -c providers/deepseek/client.js
+          node -c providers/deepseek/auth.js
+          node -c providers/qwen/client.js
+          node -c providers/gateway/gateway.js
+          node -c mcp-server/index.js
+          node -e "console.log('All provider scripts syntax OK')"

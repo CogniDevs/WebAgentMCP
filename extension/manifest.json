@@ -3,7 +3,7 @@
 	"name": "WebAgentMCP",
 	"version": "0.1.0",
 	"description": "Universal Web-to-Local Bridge & MCP Host for any AI Chat",
-	"permissions": ["sidePanel", "activeTab", "storage", "scripting"],
+	"permissions": ["sidePanel", "activeTab", "storage", "scripting", "tabs"],
 	"host_permissions": [
 		"http://127.0.0.1:5505/*",
 		"http://localhost:5505/*",

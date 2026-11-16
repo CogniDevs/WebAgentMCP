@@ -42,6 +42,31 @@
       </div>
     </section>
 
+    <section class="card">
+      <div class="card-title flex-between">
+        <span data-i18n="mode_title">Execution Mode</span>
+        <span id="mode-status-badge" class="badge">Auto</span>
+      </div>
+      <div class="mode-options">
+        <label class="mode-radio-label">
+          <input type="radio" name="agent-mode" id="mode-auto" value="auto" checked>
+          <span data-i18n="mode_auto">Auto-send</span>
+        </label>
+        <label class="mode-radio-label">
+          <input type="radio" name="agent-mode" id="mode-manual" value="manual">
+          <span data-i18n="mode_manual">Manual review</span>
+        </label>
+      </div>
+      <div id="pending-submission" class="pending-box hidden">
+        <div class="pending-title" data-i18n="pending_ready">Tool output ready:</div>
+        <div id="pending-snippet" class="snippet"></div>
+        <div class="pending-actions">
+          <button id="send-pending-btn" class="btn btn-primary btn-sm" data-i18n="send_to_chat_btn">Send to Chat</button>
+          <button id="discard-pending-btn" class="btn btn-secondary btn-sm" data-i18n="discard_btn">Discard</button>
+        </div>
+      </div>
+    </section>
+
     <section class="card flex-1">
       <div class="card-title" data-i18n="activity_title">Agent Activity</div>
       <div id="activity-box" class="activity-box">

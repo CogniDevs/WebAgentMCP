@@ -337,9 +337,18 @@ async fn run_tool(
     };
 
     let clean_name = req.name
-        .split(|c: char| c.is_whitespace() || c == '\'' || c == '"')
-        .next()
+        .trim()
+        .trim_start_matches(|c: char| c == '\'' || c == '"' || c == '<' || c == '`')
+        .trim_end_matches(|c: char| c == '\'' || c == '"' || c == '>' || c == '`')
+        .trim()
+        .trim_start_matches("run:")
+        .trim_start_matches("tool:");
+    let clean_name = clean_name
+        .split(|c: char| c.is_whitespace() || c == '=' || c == ':' || c == '\'' || c == '"')
+        .find(|s| !s.is_empty())
         .unwrap_or(&req.name)
+        .trim_start_matches("run:")
+        .trim_start_matches("tool:")
         .trim();
 
     let exec_msg = t_fmt("tool_executing", &[("name", clean_name)]);
@@ -415,34 +424,57 @@ async fn run_tool(
 async fn get_system_prompt(State(state): State<AppState>) -> impl IntoResponse {
     let mcp_prompt = state.mcp.generate_tools_prompt().await;
 
+    let workspace = {
+        let cfg = state.config.lock().await;
+        cfg.workspace_dir.clone()
+    };
+
+    let (overview_tree, readme_opt) = crate::tools::fs::get_project_overview(&workspace);
+
+    let mut project_context = String::new();
+    if !overview_tree.is_empty() {
+        project_context.push_str(&format!(
+            "\n\nPROJECT STRUCTURE OVERVIEW (Max depth 2):\n```text\n{}\n```\n[NOTICE TO AGENT: The directory tree above is a high-level summary to conserve token budget. Ask the user which specific part or module of the project they are working on, or use <tool='view_dir'>sub_directory</tool> to explore deeper folders on demand.]",
+            overview_tree
+        ));
+    }
+
+    if let Some(readme) = readme_opt {
+        project_context.push_str(&format!(
+            "\n\nPROJECT README (Documentation):\n```markdown\n{}\n```\n[NOTICE TO AGENT: Review this README to understand project architecture, tech stack, and goals. Always confirm with the user which specific task, module, or bug they want to address before initiating large file reads.]",
+            readme
+        ));
+    }
+
     let base_prompt = [
         "You are WebAgentMCP, an autonomous software engineer connected to a local system execution bridge.",
-        "You have direct execution access to the user's workspace and terminal via custom XML tool blocks.",
+        "You have direct execution access to the user's workspace and terminal via custom tool blocks.",
+        "ENVIRONMENT CONTEXT: Host OS is Windows. Shell: cmd.exe / PowerShell. Use Windows or cross-platform tools (git, cargo, npm, python, etc.).",
         "CRITICAL OPERATIONAL RULES:",
-        "1. Output raw XML tool tags to perform actions. Every fact must originate from an actual tool result in this session.",
-        "2. Stop your turn immediately after closing </tool>. Do not simulate or imagine results.",
-        "3. AUTONOMOUS CONTINUATION: When a file or terminal output is large, the bridge returns the initial chunk with pagination metadata and an explicit follow-up call suggestion. If you need subsequent lines, invoke the recommended <tool='read_lines'> tag in your next turn. Never stop, apologize, or report failure due to chunked data.",
-        "4. EXPLORE BEFORE YOU EDIT: Always use view_dir, search_code, or read_lines before patching files.",
-        "5. IMAGE GENERATION: When you generate an image/SVG in chat, the bridge auto-downloads it to agent-creations/ and notifies you of the local relative path. Use that path in your code once reported.",
-        "\nAVAILABLE CORE TOOLS:",
-        "- View Directory Structure (ASCII tree):\n  <tool='view_dir'>src</tool>",
-        "- Read File (Initial chunk with pagination metadata if large):\n  <tool='read' path='path/to/file.rs'></tool>",
-        "- Read Specific Line Range:\n  <tool='read_lines' path='file.rs' start='10' end='40'></tool>",
-        "- Search Codebase (Regex or exact substring):\n  <tool='search_code' query='fn calculate'>src</tool>",
-        "- Write New / Overwrite Entire File:\n  <tool='write' path='path/to/file.rs'>\n[RAW CONTENT]\n</tool>",
-        "- Surgical Replace Block (Bounded by lines):\n  <tool='replace' path='path/to/file.rs' start='10' end='25'>\n<search>\n[EXACT OLD TEXT]\n</search>\n<replace>\n[NEW REPLACEMENT TEXT]\n</replace>\n</tool>",
-        "- Surgical Patch File:\n  <tool='patch' path='path/to/file.rs'>\n<search>\n[EXACT OLD TEXT]\n</search>\n<replace>\n[NEW REPLACEMENT TEXT]\n</replace>\n</tool>",
-        "- Run Terminal Command (Auto-backgrounds after 5s if long-running):\n  <tool='terminal_run'>cargo build</tool>",
-        "- Start Background Process (Returns PID):\n  <tool='terminal_bg'>npm run dev</tool>",
-        "- Read Background Process Logs:\n  <tool='terminal_logs' pid='PID_HERE'></tool>",
-        "- Terminate Background Process:\n  <tool='terminal_kill' pid='PID_HERE'></tool>",
-        "- Monitor Background Process (Sleep and fetch logs):\n  <tool='cron_monitor' pid='PID_HERE' delay='15'></tool>",
+        "1. Output tools using standard Markdown code fences (e.g. ```run:terminal_run\ngit status\n```) or XML tags (e.g. <tool='terminal_run'>git status</tool>). Every action must be real; do not simulate outputs.",
+        "2. Stop your turn immediately after your tool block. Do not predict or write fake results.",
+        "3. HYBRID TOOL RESULTS: When tools return extensive file contents or long terminal logs, the output is delivered as an attached .txt file containing XML <tool_result> blocks. Inspect attached files as context.",
+        "4. BATCH ACTIONS: You may execute multiple independent read actions in a single turn by emitting multiple tool blocks.",
+        "5. EXPLORE BEFORE YOU EDIT: Always verify file contents and project structure before patching files.",
+        "6. SCOPE AWARENESS: Use the high-level project structure and README to orient yourself. Confirm with the user which specific feature, module, or file they want to work on to prevent unnecessary token consumption.",
+        "\nAVAILABLE CORE TOOLS (Emit using Markdown blocks or XML tags):",
+        "- Run Terminal Command:\n  ```run:terminal_run\n  git status\n  ```\n  (or <tool='terminal_run'>git status</tool>)",
+        "- Read File (Full contents):\n  ```run:read path='path/to/file.rs'\n  ```\n  (or <tool='read' path='path/to/file.rs'></tool>)",
+        "- Read Specific Line Range:\n  ```run:read_lines path='file.rs' start='10' end='40'\n  ```",
+        "- View Directory Structure (ASCII tree):\n  ```run:view_dir\n  src\n  ```",
+        "- Search Codebase:\n  ```run:search_code query='fn calculate'\n  src\n  ```",
+        "- Write New / Overwrite File:\n  ```run:write path='path/to/file.rs'\n  [RAW CONTENT]\n  ```",
+        "- Surgical Patch File:\n  ```run:patch path='path/to/file.rs'\n  <search>\n  [EXACT OLD TEXT]\n  </search>\n  <replace>\n  [NEW REPLACEMENT TEXT]\n  </replace>\n  ```",
+        "- Start Background Process (Returns PID):\n  ```run:terminal_bg\n  npm run dev\n  ```",
+        "- Read Background Process Logs:\n  ```run:terminal_logs pid='PID_HERE'\n  ```",
+        "- Terminate Background Process:\n  ```run:terminal_kill pid='PID_HERE'\n  ```",
+        "- Monitor Background Process:\n  ```run:cron_monitor pid='PID_HERE' delay='15'\n  ```",
     ].join("\n");
 
     let full_prompt = if mcp_prompt.is_empty() {
-        format!("{}\n\nAcknowledge instructions strictly by replying: WebAgentMCP Ready.", base_prompt)
+        format!("{}{}\n\nAcknowledge instructions strictly by replying: WebAgentMCP Ready.", base_prompt, project_context)
     } else {
-        format!("{}\n\n{}\n\nAcknowledge instructions strictly by replying: WebAgentMCP Ready.", base_prompt, mcp_prompt)
+        format!("{}{}\n\n{}\n\nAcknowledge instructions strictly by replying: WebAgentMCP Ready.", base_prompt, project_context, mcp_prompt)
     };
 
     Json(json!({ "prompt": full_prompt }))

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -25,24 +25,18 @@ pub fn paginate_output(workspace: &str, output: &str, max_chars: usize) -> Strin
     let lines: Vec<&str> = output.lines().collect();
     let total_lines = lines.len();
 
-    if total_lines <= 150 {
-        let safe_boundary = output.floor_char_boundary(max_chars);
-        return format!(
-            "{}\n\n[Showing first {} characters of {}. Full log preserved in .webagentmcp/last_output.txt]",
-            &output[..safe_boundary],
-            safe_boundary,
-            output.len()
-        );
+    if total_lines <= 1500 {
+        return output.to_string();
     }
 
-    let head = lines[..100.min(total_lines)].join("\n");
-    let tail_start = total_lines.saturating_sub(40);
+    let head = lines[..800.min(total_lines)].join("\n");
+    let tail_start = total_lines.saturating_sub(400);
     let tail = lines[tail_start..].join("\n");
 
     format!(
-        "{}\n\n[... {} lines omitted ...]\n\n{}\n\n[Showing lines 1-100 and {}-{} of {} total. Full log preserved in .webagentmcp/last_output.txt. To read specific range, invoke: <tool='read_lines' path='.webagentmcp/last_output.txt' start='101' end='250'></tool>]",
+        "{}\n\n[... {} lines omitted ...]\n\n{}\n\n[Showing lines 1-800 and {}-{} of {} total. Full log preserved in .webagentmcp/last_output.txt]",
         head,
-        tail_start.saturating_sub(100),
+        tail_start.saturating_sub(800),
         tail,
         tail_start + 1,
         total_lines,
@@ -61,6 +55,39 @@ pub struct TerminalManager {
     processes: Arc<Mutex<HashMap<String, ProcessInfo>>>,
 }
 
+async fn stream_to_logs<R: tokio::io::AsyncRead + Unpin>(
+    mut reader: R,
+    pref: Arc<Mutex<HashMap<String, ProcessInfo>>>,
+    pid: String,
+) {
+    let mut buffer = [0u8; 4096];
+    let mut leftover = String::new();
+    while let Ok(n) = reader.read(&mut buffer).await {
+        if n == 0 {
+            break;
+        }
+        let chunk = String::from_utf8_lossy(&buffer[..n]);
+        leftover.push_str(&chunk);
+        while let Some(pos) = leftover.find('\n') {
+            let line = leftover[..pos].trim_end_matches('\r').to_string();
+            leftover = leftover[pos + 1..].to_string();
+            let mut map = pref.lock().await;
+            if let Some(proc) = map.get_mut(&pid) {
+                if proc.logs.len() >= 1500 {
+                    proc.logs.pop_front();
+                }
+                proc.logs.push_back(line);
+            }
+        }
+    }
+    if !leftover.is_empty() {
+        let mut map = pref.lock().await;
+        if let Some(proc) = map.get_mut(&pid) {
+            proc.logs.push_back(leftover);
+        }
+    }
+}
+
 impl Default for TerminalManager {
     fn default() -> Self {
         Self::new()
@@ -77,10 +104,40 @@ impl TerminalManager {
     fn build_shell_command(workspace: &str, cmd_str: &str) -> Command {
         #[cfg(target_os = "windows")]
         {
-            let mut cmd = Command::new("cmd");
-            let full_cmd = format!("chcp 65001 >nul && {}", cmd_str);
-            cmd.args(["/C", &full_cmd])
-                .current_dir(Path::new(workspace))
+            let trimmed = cmd_str.trim();
+            let is_unix_cmd = trimmed.starts_with("ls")
+                || trimmed.starts_with("pwd")
+                || trimmed.starts_with("cat ")
+                || trimmed.starts_with("grep ")
+                || trimmed.starts_with("rm -")
+                || trimmed.starts_with("touch ");
+
+            let mut ps_cmd = cmd_str.to_string();
+            if trimmed.starts_with("ls") {
+                ps_cmd = ps_cmd
+                    .replace(" -la ", " -Force ")
+                    .replace(" -al ", " -Force ")
+                    .replace(" -l ", " ")
+                    .replace(" -a ", " -Force ");
+                if ps_cmd.ends_with(" -la") || ps_cmd.ends_with(" -al") || ps_cmd.ends_with(" -a") {
+                    ps_cmd = ps_cmd.trim_end_matches(" -la").trim_end_matches(" -al").trim_end_matches(" -a").to_string();
+                    ps_cmd.push_str(" -Force");
+                } else if ps_cmd.ends_with(" -l") {
+                    ps_cmd = ps_cmd.trim_end_matches(" -l").to_string();
+                }
+            }
+
+            let mut cmd = if is_unix_cmd {
+                let mut c = Command::new("powershell");
+                c.args(["-NoProfile", "-NonInteractive", "-Command", &ps_cmd]);
+                c
+            } else {
+                let mut c = Command::new("cmd");
+                let full_cmd = format!("chcp 65001 >nul && {}", cmd_str);
+                c.args(["/C", &full_cmd]);
+                c
+            };
+            cmd.current_dir(Path::new(workspace))
                 .env("PYTHONIOENCODING", "utf-8")
                 .env("PYTHONUTF8", "1")
                 .env("FORCE_COLOR", "0")
@@ -119,7 +176,7 @@ impl TerminalManager {
 
         let info = ProcessInfo {
             status: "running".to_string(),
-            logs: VecDeque::with_capacity(500),
+            logs: VecDeque::with_capacity(1500),
         };
 
         {
@@ -134,16 +191,7 @@ impl TerminalManager {
             let pref = processes_ref.clone();
             let pid = pid_clone.clone();
             tokio::spawn(async move {
-                let mut reader = BufReader::new(out).lines();
-                while let Ok(Some(line)) = reader.next_line().await {
-                    let mut map = pref.lock().await;
-                    if let Some(proc) = map.get_mut(&pid) {
-                        if proc.logs.len() >= 500 {
-                            proc.logs.pop_front();
-                        }
-                        proc.logs.push_back(line);
-                    }
-                }
+                stream_to_logs(out, pref, pid).await;
             });
         }
 
@@ -151,16 +199,7 @@ impl TerminalManager {
             let pref = processes_ref.clone();
             let pid = pid_clone.clone();
             tokio::spawn(async move {
-                let mut reader = BufReader::new(err).lines();
-                while let Ok(Some(line)) = reader.next_line().await {
-                    let mut map = pref.lock().await;
-                    if let Some(proc) = map.get_mut(&pid) {
-                        if proc.logs.len() >= 500 {
-                            proc.logs.pop_front();
-                        }
-                        proc.logs.push_back(line);
-                    }
-                }
+                stream_to_logs(err, pref, pid).await;
             });
         }
 
@@ -172,7 +211,14 @@ impl TerminalManager {
             let mut map = pref_status.lock().await;
             if let Some(proc) = map.get_mut(&pid_status) {
                 proc.status = match status_res {
-                    Ok(exit) => format!("exited ({})", exit.code().unwrap_or(0)),
+                    Ok(exit) => {
+                        let code = exit.code().unwrap_or(0);
+                        if code == 0 {
+                            "exited (0)".to_string()
+                        } else {
+                            format!("exited ({}) [Error]", code)
+                        }
+                    }
                     Err(_) => "failed".to_string(),
                 };
             }
@@ -186,12 +232,7 @@ impl TerminalManager {
                 let mut map = self.processes.lock().await;
                 map.remove(&pid_str);
 
-                let trimmed = logs.trim();
-                if trimmed.is_empty() {
-                    Ok("Command finished successfully (quick run).".to_string())
-                } else {
-                    Ok(paginate_output(workspace, trimmed, 24000))
-                }
+                Ok(paginate_output(workspace, &logs, 24000))
             }
             Err(_) => {
                 tokio::time::sleep(Duration::from_millis(50)).await;
@@ -225,7 +266,7 @@ impl TerminalManager {
 
         let info = ProcessInfo {
             status: "running".to_string(),
-            logs: VecDeque::with_capacity(500),
+            logs: VecDeque::with_capacity(1500),
         };
 
         {
@@ -240,16 +281,7 @@ impl TerminalManager {
             let pref = processes_ref.clone();
             let pid = pid_clone.clone();
             tokio::spawn(async move {
-                let mut reader = BufReader::new(out).lines();
-                while let Ok(Some(line)) = reader.next_line().await {
-                    let mut map = pref.lock().await;
-                    if let Some(proc) = map.get_mut(&pid) {
-                        if proc.logs.len() >= 500 {
-                            proc.logs.pop_front();
-                        }
-                        proc.logs.push_back(line);
-                    }
-                }
+                stream_to_logs(out, pref, pid).await;
             });
         }
 
@@ -257,16 +289,7 @@ impl TerminalManager {
             let pref = processes_ref.clone();
             let pid = pid_clone.clone();
             tokio::spawn(async move {
-                let mut reader = BufReader::new(err).lines();
-                while let Ok(Some(line)) = reader.next_line().await {
-                    let mut map = pref.lock().await;
-                    if let Some(proc) = map.get_mut(&pid) {
-                        if proc.logs.len() >= 500 {
-                            proc.logs.pop_front();
-                        }
-                        proc.logs.push_back(line);
-                    }
-                }
+                stream_to_logs(err, pref, pid).await;
             });
         }
 
@@ -275,7 +298,14 @@ impl TerminalManager {
             let mut map = processes_ref.lock().await;
             if let Some(proc) = map.get_mut(&pid_clone) {
                 proc.status = match status_res {
-                    Ok(exit) => format!("exited ({})", exit.code().unwrap_or(0)),
+                    Ok(exit) => {
+                        let code = exit.code().unwrap_or(0);
+                        if code == 0 {
+                            "exited (0)".to_string()
+                        } else {
+                            format!("exited ({}) [Error]", code)
+                        }
+                    }
                     Err(_) => "failed".to_string(),
                 };
             }
@@ -293,11 +323,11 @@ impl TerminalManager {
             Some(proc) => {
                 let lines: Vec<String> = proc.logs.iter().cloned().collect();
                 let log_text = if lines.is_empty() {
-                    "No output yet.".to_string()
+                    "No output produced.".to_string()
                 } else {
                     lines.join("\n")
                 };
-                Ok(format!("STATUS: {}\nLOGS:\n{}", proc.status, log_text))
+                Ok(format!("STATUS: {}\nOUTPUT:\n{}", proc.status, log_text))
             }
             None => Err(format!("Process with PID {} not found.", pid)),
         }
