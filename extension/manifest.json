@@ -1,7 +1,7 @@
 {
 	"manifest_version": 3,
 	"name": "WebAgentMCP",
-	"version": "0.1.0",
+	"version": "1.0.0",
 	"description": "Universal Web-to-Local Bridge & MCP Host for any AI Chat",
 	"permissions": ["sidePanel", "activeTab", "storage", "scripting", "tabs"],
 	"host_permissions": [

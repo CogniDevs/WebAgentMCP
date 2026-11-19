@@ -72,12 +72,24 @@ class QwenWebClient {
 
         await this.applyAntiBanJitter();
 
+        let session = this.activeSessions.get(sessionKey);
+        const now = Date.now();
+        if (!session || (now - session.lastActive > 90 * 60 * 1000)) {
+            session = { messages: [], lastActive: now };
+            this.activeSessions.set(sessionKey, session);
+        } else {
+            session.lastActive = now;
+        }
+
+        session.messages.push({ role: 'user', content: prompt });
+        if (session.messages.length > 20) {
+            session.messages = session.messages.slice(-20);
+        }
+
         const apiUrl = `${this.auth.baseUrl}/api/v1/chat/completions`;
         const payload = {
             model: model,
-            messages: [
-                { role: 'user', content: prompt }
-            ],
+            messages: [...session.messages],
             stream: Boolean(onChunk),
             incremental: true,
             chat_type: 't2t',
@@ -98,6 +110,12 @@ class QwenWebClient {
         if (!onChunk) {
             const json = await resp.json();
             const text = json?.choices?.[0]?.message?.content || json?.data?.content || '';
+            if (text) {
+                session.messages.push({ role: 'assistant', content: text });
+                if (session.messages.length > 20) {
+                    session.messages = session.messages.slice(-20);
+                }
+            }
             return {
                 content: text,
                 model,
@@ -128,11 +146,18 @@ class QwenWebClient {
                     const delta = parsed?.choices?.[0]?.delta?.content || '';
                     if (delta) {
                         fullContent += delta;
-                        onChunk({ type: 'content', text: delta });
+                        if (onChunk) onChunk({ type: 'content', text: delta });
                     }
                 } catch {
                     // Ignore malformed sse frames
                 }
+            }
+        }
+
+        if (fullContent) {
+            session.messages.push({ role: 'assistant', content: fullContent });
+            if (session.messages.length > 20) {
+                session.messages = session.messages.slice(-20);
             }
         }
 

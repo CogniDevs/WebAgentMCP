@@ -321,9 +321,18 @@
 	}
 
 	// Watchdog for stuck system messages
-	setInterval(() => {
+	setInterval(async () => {
 		const input = findInput()
 		if (!input) return
+
+		// Check mode: Auto-send vs Manual Confirmation
+		const modeConfig = await new Promise(resolve => {
+			chrome.storage.local.get(['autoSendMode'], resolve)
+		})
+		if (modeConfig && modeConfig.autoSendMode === false) {
+			// Manual review mode: do not auto-send stuck messages
+			return
+		}
 
 		const text =
 			input.tagName === 'TEXTAREA' || input.tagName === 'INPUT'
@@ -614,14 +623,32 @@
 		}
 	}
 
+	function getTopLevelResponseContainers() {
+		if (!adapter.responseContainer) return []
+		const all = Array.from(document.querySelectorAll(adapter.responseContainer))
+		if (all.length === 0) return []
+
+		// Filter out any element that is a descendant of another matching container
+		// We want the outermost container so we capture the full response
+		return all.filter(el => {
+			let parent = el.parentElement
+			while (parent && parent !== document.body) {
+				if (parent.matches && parent.matches(adapter.responseContainer)) {
+					return false
+				}
+				parent = parent.parentElement
+			}
+			return true
+		})
+	}
+
 	setInterval(() => {
 		if (isExecuting) return
 
-		const containers = document.querySelectorAll(adapter.responseContainer)
+		const containers = getTopLevelResponseContainers()
 		if (!containers || containers.length === 0) return
 
 		const last = containers[containers.length - 1]
-		if (last.hasAttribute('data-agent-processed')) return
 
 		const currentText = getDeepText(last)
 		const currentLength = currentText.length
@@ -633,6 +660,16 @@
 				!!stopBtn && (stopBtn.offsetWidth > 0 || stopBtn.offsetHeight > 0)
 		}
 
+		// Reset data-agent-processed if model resumed generating or added new text
+		if (last.hasAttribute('data-agent-processed')) {
+			const lastLen = parseInt(last.getAttribute('data-agent-last-len') || '0', 10)
+			if (isGenerating || currentLength > lastLen + 5) {
+				last.removeAttribute('data-agent-processed')
+			} else {
+				return
+			}
+		}
+
 		if (currentLength > previousLength) {
 			previousLength = currentLength
 			unchangedTicks = 0
@@ -640,12 +677,17 @@
 			unchangedTicks++
 		}
 
-		// Execute if generation stopped (at least 2 ticks = 1s without change)
-		// OR safety fallback: if text unchanged for 5 ticks (2.5s) even if stop indicator has false match
-		if ((!isGenerating && unchangedTicks >= 2) || unchangedTicks >= 5) {
+		// Thinking models (DeepSeek-R1, Gemini 4) can pause for 5-20s during reasoning.
+		// While isGenerating is TRUE, do not prematurely treat response as finished.
+		// Finish condition:
+		// 1) Stop indicator is gone (!isGenerating) AND output was stable for 2 ticks (1s).
+		// 2) Safety timeout: text completely unchanged for 40 ticks (20s) in case stop button hung.
+		const isFinished = (!isGenerating && unchangedTicks >= 2) || (unchangedTicks >= 40)
+		if (isFinished && currentLength > 0) {
 			unchangedTicks = 0
 			previousLength = 0
 			last.setAttribute('data-agent-processed', 'true')
+			last.setAttribute('data-agent-last-len', String(currentLength))
 			const tools = extractToolsFromContainer(last)
 			if (tools.length > 0) {
 				runToolsSequentially(tools)

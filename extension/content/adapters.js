@@ -26,7 +26,7 @@ window.WebAgentAdapters = {
 		],
 		stopIndicator: 'button[aria-label="Stop" i], button[aria-label="Cancel" i], button[aria-label*="Остановить" i]',
 		responseContainer:
-			'ms-chat-turn.model-turn, ms-text-chunk, div[data-turn-role="model"], .model-turn, .chat-turn, ms-chat-turn',
+			'ms-chat-turn.model-turn, div[data-turn-role="model"], .model-turn, .chat-turn, ms-chat-turn, ms-text-chunk',
 		fileInputSelectors: [
 			'ms-prompt-editor input[type="file"]',
 			'ms-prompt-box input[type="file"]',
@@ -114,7 +114,7 @@ window.WebAgentAdapters = {
 		stopIndicator:
 			'button[aria-label*="Stop generating" i], button[aria-label*="Stop" i], button[aria-label*="Остановить" i]',
 		responseContainer:
-			'message-content, model-response, .model-response-text, [class*="model-response"], .response-container',
+			'model-response, [class*="model-response"], .response-container, message-content, .model-response-text',
 		fileInputSelectors: ['uploader input[type="file"]', 'input[type="file"]'],
 		attachButtonSelectors: [
 			'button[aria-label*="Upload" i]',

@@ -79,7 +79,7 @@ class DeepSeekWebClient {
         if (existing && existing.messageCount < 60 && (now - existing.lastActive < 90 * 60 * 1000)) {
             existing.lastActive = now;
             existing.messageCount++;
-            return existing.sessionId;
+            return existing;
         }
 
         // Create new session
@@ -100,13 +100,15 @@ class DeepSeekWebClient {
             throw new Error('[DeepSeek] Invalid session response: missing biz_data.id');
         }
 
-        this.activeSessions.set(sessionKey, {
+        const sessionObj = {
             sessionId,
             messageCount: 1,
             lastActive: now,
-        });
+            lastMessageId: null,
+        };
+        this.activeSessions.set(sessionKey, sessionObj);
 
-        return sessionId;
+        return sessionObj;
     }
 
     async solveChallenge(targetPath = '/api/v0/chat/completion') {
@@ -146,14 +148,15 @@ class DeepSeekWebClient {
 
         await this.applyAntiBanJitter();
 
-        const sessionId = await this.getOrCreateSession(sessionKey);
+        const session = await this.getOrCreateSession(sessionKey);
+        const sessionId = session.sessionId;
         const powResponse = await this.solveChallenge('/api/v0/chat/completion');
 
         const thinkingEnabled = model.includes('reasoner') || model.includes('r1');
 
         const body = {
             chat_session_id: sessionId,
-            parent_message_id: null,
+            parent_message_id: session.lastMessageId || null,
             prompt: prompt,
             ref_file_ids: [],
             thinking_enabled: thinkingEnabled,
@@ -198,6 +201,17 @@ class DeepSeekWebClient {
 
                 try {
                     const parsed = JSON.parse(jsonStr);
+                    const msgId = parsed?.data?.biz_data?.id ||
+                                  parsed?.data?.biz_data?.message_id ||
+                                  parsed?.data?.message_id ||
+                                  parsed?.data?.response?.message_id ||
+                                  parsed?.choices?.[0]?.message_id ||
+                                  parsed?.choices?.[0]?.id ||
+                                  parsed?.message_id;
+                    if (msgId) {
+                        session.lastMessageId = msgId;
+                    }
+
                     const fragment = parsed?.choices?.[0]?.delta || parsed?.data?.response;
                     
                     // Handle thinking / reasoning chunk

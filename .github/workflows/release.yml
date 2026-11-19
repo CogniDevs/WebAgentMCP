@@ -94,7 +94,7 @@ jobs:
 
       - name: Create providers zip archive
         run: |
-          zip -r webagentmcp-providers.zip providers mcp-server package.json README.md README.ru.md
+          zip -r webagentmcp-providers.zip providers mcp-server package.json README.md
 
       - name: Upload providers artifact
         uses: actions/upload-artifact@v4

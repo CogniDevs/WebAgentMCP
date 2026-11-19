@@ -46,6 +46,7 @@ pub fn paginate_output(workspace: &str, output: &str, max_chars: usize) -> Strin
 
 #[derive(Debug, Clone)]
 pub struct ProcessInfo {
+    pub os_pid: Option<u32>,
     pub status: String,
     pub logs: VecDeque<String>,
 }
@@ -170,11 +171,13 @@ impl TerminalManager {
             .spawn()
             .map_err(|e| format!("Failed to spawn command: {}", e))?;
 
+        let os_pid = child.id();
         let pid_str = Uuid::new_v4().to_string()[..8].to_string();
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
         let info = ProcessInfo {
+            os_pid,
             status: "running".to_string(),
             logs: VecDeque::with_capacity(1500),
         };
@@ -260,11 +263,13 @@ impl TerminalManager {
             .spawn()
             .map_err(|e| format!("Failed to spawn background process: {}", e))?;
 
+        let os_pid = child.id();
         let pid_str = Uuid::new_v4().to_string()[..8].to_string();
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
         let info = ProcessInfo {
+            os_pid,
             status: "running".to_string(),
             logs: VecDeque::with_capacity(1500),
         };
@@ -336,25 +341,32 @@ impl TerminalManager {
     pub async fn kill(&self, pid: &str) -> Result<String, String> {
         let mut map = self.processes.lock().await;
         if let Some(proc) = map.get_mut(pid) {
-            #[cfg(target_os = "windows")]
-            {
-                let _ = Command::new("taskkill")
-                    .args(["/F", "/T", "/PID", pid])
-                    .creation_flags(CREATE_NO_WINDOW)
-                    .output()
-                    .await;
-            }
+            if let Some(os_pid) = proc.os_pid {
+                let os_pid_str = os_pid.to_string();
+                #[cfg(target_os = "windows")]
+                {
+                    let _ = Command::new("taskkill")
+                        .args(["/F", "/T", "/PID", &os_pid_str])
+                        .creation_flags(CREATE_NO_WINDOW)
+                        .output()
+                        .await;
+                }
 
-            #[cfg(not(target_os = "windows"))]
-            {
-                let _ = Command::new("pkill")
-                    .args(["-P", pid])
-                    .output()
-                    .await;
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let _ = Command::new("kill")
+                        .args(["-9", &os_pid_str])
+                        .output()
+                        .await;
+                    let _ = Command::new("pkill")
+                        .args(["-P", &os_pid_str])
+                        .output()
+                        .await;
+                }
             }
 
             proc.status = "killed".to_string();
-            Ok(format!("Process {} terminated.", pid))
+            Ok(format!("Process {} (OS PID {:?}) terminated.", pid, proc.os_pid))
         } else {
             Err(format!("Process with PID {} not found.", pid))
         }
